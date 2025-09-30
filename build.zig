@@ -38,7 +38,6 @@ pub fn build(b: *Build) !void {
             .target = target,
             .optimize = optimize,
         }),
-        .use_llvm = true,
     });
     testrunner.root_module.addImport("zware", zware_module);
 
