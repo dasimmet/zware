@@ -11,11 +11,13 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = true,
     });
     exe.root_module.addAnonymousImport("zware", .{
         .root_source_file = b.path("../../src/main.zig"),
     });
     b.installArtifact(exe);
+    b.getInstallStep().dependOn(&b.addInstallBinFile(exe.getEmittedAsm(), "fib.asm").step);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

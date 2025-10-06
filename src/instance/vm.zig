@@ -105,13 +105,15 @@ pub const VirtualMachine = struct {
             .ip = ip,
             .code = self.inst.module.parsed_code.items,
         };
+        var next_fn: InstructionFunction = undefined;
         while (cur_ip.ip != std.math.maxInt(@TypeOf(cur_ip.ip))) {
             const instr = self.inst.module.parsed_code.items[cur_ip.ip];
-            try lookup[@intFromEnum(instr)](self, &cur_ip);
+            next_fn = lookup[@intFromEnum(instr)];
+            try next_fn(self, &cur_ip);
         }
     }
 
-    const InstructionFunction = *const fn (*VirtualMachine, *Instruction) WasmError!void;
+    const InstructionFunction = *const fn (*VirtualMachine, *Instruction) callconv(.@"inline") WasmError!void;
 
     const lookup = [256]InstructionFunction{
         @"unreachable",     nop,                block,                loop,                 @"if",                @"else",              if_no_else,        impl_ni,              impl_ni,              impl_ni,              impl_ni,              end,                br,                     br_if,                  br_table,               @"return",
@@ -134,20 +136,20 @@ pub const VirtualMachine = struct {
 
     pub const REF_NULL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
-    fn impl_ni(_: *VirtualMachine, _: *Instruction) WasmError!void {
+    inline fn impl_ni(_: *VirtualMachine, _: *Instruction) WasmError!void {
         return error.NotImplemented;
     }
 
-    fn @"unreachable"(_: *VirtualMachine, _: *Instruction) WasmError!void {
+    inline fn @"unreachable"(_: *VirtualMachine, _: *Instruction) WasmError!void {
         return error.TrapUnreachable;
     }
 
-    fn nop(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn nop(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         _ = self;
         ip.ip += 1;
     }
 
-    fn block(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn block(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].block;
 
         try self.pushLabel(Label{
@@ -159,7 +161,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn loop(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn loop(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].loop;
 
         try self.pushLabel(Label{
@@ -172,7 +174,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"if"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"if"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"if";
         const condition = self.popOperand(u32);
 
@@ -185,13 +187,13 @@ pub const VirtualMachine = struct {
         ip.ip = if (condition == 0) meta.else_ip else ip.ip + 1;
     }
 
-    fn @"else"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"else"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const label = self.popLabel();
 
         ip.ip = label.branch_target;
     }
 
-    fn if_no_else(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn if_no_else(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].if_no_else;
         const condition = self.popOperand(u32);
 
@@ -209,25 +211,25 @@ pub const VirtualMachine = struct {
         }
     }
 
-    fn end(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn end(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         _ = self.popLabel();
 
         ip.ip += 1;
     }
 
-    fn br(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn br(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const next_ip = self.branch(ip.code[ip.ip].br);
 
         ip.ip = next_ip;
     }
 
-    fn br_if(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn br_if(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const condition = self.popOperand(u32);
 
         ip.ip = if (condition == 0) ip.ip + 1 else self.branch(ip.code[ip.ip].br_if);
     }
 
-    fn br_table(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn br_table(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].br_table;
 
         const i = self.popOperand(u32);
@@ -238,7 +240,7 @@ pub const VirtualMachine = struct {
         ip.ip = next_ip;
     }
 
-    fn @"return"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"return"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const frame = self.peekFrame();
         const n = frame.return_arity;
 
@@ -267,7 +269,7 @@ pub const VirtualMachine = struct {
         ip.code = previous_frame.inst.module.parsed_code.items;
     }
 
-    fn call(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn call(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const funcidx = ip.code[ip.ip].call;
 
         const function = try self.inst.getFunc(funcidx);
@@ -310,7 +312,7 @@ pub const VirtualMachine = struct {
         ip.code = self.inst.module.parsed_code.items;
     }
 
-    fn call_indirect(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn call_indirect(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const call_indirect_instruction = ip.code[ip.ip].call_indirect;
         const module = self.inst.module;
 
@@ -326,8 +328,6 @@ pub const VirtualMachine = struct {
         // Check that signatures match
         const call_indirect_func_type = module.types.list.items[typeidx];
         try function.checkSignatures(call_indirect_func_type);
-
-        var next_ip = ip.ip;
 
         switch (function.subtype) {
             .function => |func| {
@@ -354,20 +354,19 @@ pub const VirtualMachine = struct {
                     .branch_target = ip.ip + 1,
                 });
 
-                next_ip = func.start;
+                ip.ip = func.start;
             },
             .host_function => |host_func| {
                 try host_func.func(self, host_func.context);
 
-                next_ip = ip.ip + 1;
+                ip.ip = ip.ip + 1;
             },
         }
 
-        ip.ip = next_ip;
         ip.code = self.inst.module.parsed_code.items;
     }
 
-    fn fast_call(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn fast_call(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const f = ip.code[ip.ip].fast_call;
 
         // Check we have enough stack space
@@ -394,12 +393,12 @@ pub const VirtualMachine = struct {
         ip.ip = f.start;
     }
 
-    fn drop(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn drop(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         _ = self.popAnyOperand();
         ip.ip += 1;
     }
 
-    fn select(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn select(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const condition = self.popOperand(u32);
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
@@ -413,7 +412,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"local.get"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"local.get"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const localidx = ip.code[ip.ip].@"local.get";
 
         const frame = self.peekFrame();
@@ -423,7 +422,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"local.set"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"local.set"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const localidx = ip.code[ip.ip].@"local.set";
 
         const frame = self.peekFrame();
@@ -432,7 +431,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"local.tee"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"local.tee"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const localidx = ip.code[ip.ip].@"local.tee";
 
         const frame = self.peekFrame();
@@ -441,7 +440,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"global.get"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"global.get"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const globalidx = ip.code[ip.ip].@"global.get";
 
         const global = try self.inst.getGlobal(globalidx);
@@ -451,7 +450,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"global.set"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"global.set"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const globalidx = ip.code[ip.ip].@"global.set";
         const value = self.popAnyOperand();
 
@@ -462,7 +461,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.get"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.get"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const tableidx = ip.code[ip.ip].@"table.get";
         const table = try self.inst.getTable(tableidx);
 
@@ -478,7 +477,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.set"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.set"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const tableidx = ip.code[ip.ip].@"table.set";
         const table = try self.inst.getTable(tableidx);
 
@@ -490,7 +489,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.load";
 
         const memory = try self.inst.getMemory(0);
@@ -502,7 +501,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load";
 
         const memory = try self.inst.getMemory(0);
@@ -514,7 +513,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"f32.load";
 
         const memory = try self.inst.getMemory(0);
@@ -526,7 +525,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.load"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"f64.load";
 
         const memory = try self.inst.getMemory(0);
@@ -538,7 +537,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.load8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.load8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.load8_s";
 
         const memory = try self.inst.getMemory(0);
@@ -550,7 +549,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.load8_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.load8_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.load8_u";
 
         const memory = try self.inst.getMemory(0);
@@ -562,7 +561,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.load16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.load16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.load16_s";
 
         const memory = try self.inst.getMemory(0);
@@ -574,7 +573,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.load16_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.load16_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.load16_u";
 
         const memory = try self.inst.getMemory(0);
@@ -586,7 +585,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load8_s";
 
         const memory = try self.inst.getMemory(0);
@@ -598,7 +597,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load8_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load8_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load8_u";
 
         const memory = try self.inst.getMemory(0);
@@ -610,7 +609,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load16_s";
 
         const memory = try self.inst.getMemory(0);
@@ -622,7 +621,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load16_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load16_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load16_u";
 
         const memory = try self.inst.getMemory(0);
@@ -634,7 +633,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load32_s";
 
         const memory = try self.inst.getMemory(0);
@@ -646,7 +645,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.load32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.load32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.load32_u";
 
         const memory = try self.inst.getMemory(0);
@@ -658,7 +657,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.store";
 
         const memory = try self.inst.getMemory(0);
@@ -670,7 +669,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.store";
 
         const memory = try self.inst.getMemory(0);
@@ -682,7 +681,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"f32.store";
 
         const memory = try self.inst.getMemory(0);
@@ -694,7 +693,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.store"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"f64.store";
 
         const memory = try self.inst.getMemory(0);
@@ -706,7 +705,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.store8"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.store8"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.store8";
 
         const memory = try self.inst.getMemory(0);
@@ -718,7 +717,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.store16"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.store16"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i32.store16";
 
         const memory = try self.inst.getMemory(0);
@@ -730,7 +729,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.store8"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.store8"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.store8";
 
         const memory = try self.inst.getMemory(0);
@@ -742,7 +741,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.store16"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.store16"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.store16";
 
         const memory = try self.inst.getMemory(0);
@@ -754,7 +753,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.store32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.store32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].@"i64.store32";
 
         const memory = try self.inst.getMemory(0);
@@ -766,7 +765,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"memory.size"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"memory.size"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const memory = try self.inst.getMemory(0);
 
         self.pushOperandNoCheck(u32, @as(u32, @intCast(memory.size())));
@@ -774,7 +773,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"memory.grow"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"memory.grow"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const memory = try self.inst.getMemory(0);
 
         const num_pages = self.popOperand(u32);
@@ -787,7 +786,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const instr = ip.code[ip.ip];
 
         self.pushOperandNoCheck(i32, instr.@"i32.const");
@@ -795,7 +794,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const instr = ip.code[ip.ip];
 
         self.pushOperandNoCheck(i64, instr.@"i64.const");
@@ -803,7 +802,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const instr = ip.code[ip.ip];
 
         self.pushOperandNoCheck(f32, instr.@"f32.const");
@@ -811,7 +810,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.const"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const instr = ip.code[ip.ip];
 
         self.pushOperandNoCheck(f64, instr.@"f64.const");
@@ -819,7 +818,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.eqz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.eqz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u32);
 
         self.pushOperandNoCheck(u32, @as(u32, if (c1 == 0) 1 else 0));
@@ -827,7 +826,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -836,7 +835,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -845,7 +844,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.lt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.lt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -854,7 +853,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.lt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.lt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -863,7 +862,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.gt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.gt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -872,7 +871,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.gt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.gt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -881,7 +880,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.le_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.le_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -890,7 +889,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.le_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.le_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -899,7 +898,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.ge_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.ge_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -908,7 +907,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.ge_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.ge_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -917,7 +916,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.eqz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.eqz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
 
         self.pushOperandNoCheck(u64, @as(u64, if (c1 == 0) 1 else 0));
@@ -925,7 +924,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -934,7 +933,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -943,7 +942,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.lt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.lt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -952,7 +951,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.lt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.lt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -961,7 +960,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.gt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.gt_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -970,7 +969,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.gt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.gt_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -979,7 +978,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.le_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.le_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -988,7 +987,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.le_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.le_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -997,7 +996,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.ge_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.ge_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -1006,7 +1005,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.ge_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.ge_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1015,7 +1014,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1024,7 +1023,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1033,7 +1032,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.lt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.lt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1042,7 +1041,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.gt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.gt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1051,7 +1050,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.le"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.le"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1060,7 +1059,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.ge"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.ge"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1069,7 +1068,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.eq"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1078,7 +1077,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.ne"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1087,7 +1086,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.lt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.lt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1096,7 +1095,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.gt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.gt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1105,7 +1104,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.le"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.le"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1114,7 +1113,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.ge"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.ge"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1123,28 +1122,28 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.clz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.clz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u32);
         self.pushOperandNoCheck(u32, @clz(c1));
 
         ip.ip += 1;
     }
 
-    fn @"i32.ctz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.ctz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u32);
         self.pushOperandNoCheck(u32, @ctz(c1));
 
         ip.ip += 1;
     }
 
-    fn @"i32.popcnt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.popcnt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u32);
         self.pushOperandNoCheck(u32, @popCount(c1));
 
         ip.ip += 1;
     }
 
-    fn @"i32.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1153,7 +1152,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1162,7 +1161,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1171,7 +1170,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.div_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.div_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -1182,7 +1181,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.div_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.div_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1193,7 +1192,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.rem_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.rem_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -1205,7 +1204,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.rem_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.rem_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1216,7 +1215,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.and"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.and"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1225,7 +1224,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.or"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.or"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1234,7 +1233,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.xor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.xor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1243,7 +1242,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.shl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.shl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1252,7 +1251,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.shr_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.shr_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i32);
         const c1 = self.popOperand(i32);
 
@@ -1263,7 +1262,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.shr_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.shr_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1272,7 +1271,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.rotl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.rotl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1281,7 +1280,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.rotr"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.rotr"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u32);
         const c1 = self.popOperand(u32);
 
@@ -1290,28 +1289,28 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.clz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.clz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
         self.pushOperandNoCheck(u64, @clz(c1));
 
         ip.ip += 1;
     }
 
-    fn @"i64.ctz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.ctz"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
         self.pushOperandNoCheck(u64, @ctz(c1));
 
         ip.ip += 1;
     }
 
-    fn @"i64.popcnt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.popcnt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
         self.pushOperandNoCheck(u64, @popCount(c1));
 
         ip.ip += 1;
     }
 
-    fn @"i64.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1320,7 +1319,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1329,7 +1328,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1338,7 +1337,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.div_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.div_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -1349,7 +1348,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.div_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.div_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1360,7 +1359,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.rem_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.rem_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -1372,7 +1371,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.rem_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.rem_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1383,7 +1382,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.and"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.and"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1392,7 +1391,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.or"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.or"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1401,7 +1400,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.xor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.xor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1410,7 +1409,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.shl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.shl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1419,7 +1418,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.shr_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.shr_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(i64);
         const c1 = self.popOperand(i64);
 
@@ -1430,7 +1429,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.shr_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.shr_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1439,7 +1438,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.rotl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.rotl"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1448,7 +1447,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.rotr"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.rotr"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(u64);
         const c1 = self.popOperand(u64);
 
@@ -1457,7 +1456,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.abs"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.abs"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f32, @abs(c1));
@@ -1465,7 +1464,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.neg"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.neg"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f32, -c1);
@@ -1473,7 +1472,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.ceil"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.ceil"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f32, @ceil(c1));
@@ -1481,7 +1480,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.floor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.floor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f32, @floor(c1));
@@ -1489,7 +1488,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.trunc"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.trunc"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f32, @trunc(c1));
@@ -1497,7 +1496,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.nearest"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.nearest"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
         const floor = @floor(c1);
         const ceil = @ceil(c1);
@@ -1515,7 +1514,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.sqrt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.sqrt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f32, math.sqrt(c1));
@@ -1523,7 +1522,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1532,7 +1531,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1541,7 +1540,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1550,7 +1549,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.div"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.div"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1559,7 +1558,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.min"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.min"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1585,7 +1584,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.max"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.max"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1611,7 +1610,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.copysign"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.copysign"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f32);
         const c1 = self.popOperand(f32);
 
@@ -1624,7 +1623,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.abs"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.abs"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f64, @abs(c1));
@@ -1632,7 +1631,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.neg"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.neg"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f64, -c1);
@@ -1640,7 +1639,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.ceil"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.ceil"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f64, @ceil(c1));
@@ -1648,7 +1647,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.floor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.floor"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f64, @floor(c1));
@@ -1656,7 +1655,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.trunc"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.trunc"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f64, @trunc(c1));
@@ -1664,7 +1663,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.nearest"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.nearest"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
         const floor = @floor(c1);
         const ceil = @ceil(c1);
@@ -1682,7 +1681,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.sqrt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.sqrt"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f64, math.sqrt(c1));
@@ -1690,7 +1689,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.add"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1699,7 +1698,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.sub"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1708,7 +1707,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.mul"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1717,7 +1716,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.div"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.div"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1726,7 +1725,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.min"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.min"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1748,7 +1747,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.max"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.max"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1770,7 +1769,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.copysign"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.copysign"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c2 = self.popOperand(f64);
         const c1 = self.popOperand(f64);
 
@@ -1783,7 +1782,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.wrap_i64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.wrap_i64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(i32, @as(i32, @truncate(c1)));
@@ -1791,7 +1790,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1806,7 +1805,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1821,7 +1820,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1836,7 +1835,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1851,7 +1850,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.extend_i32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.extend_i32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(i64, @as(i32, @truncate(c1)));
@@ -1859,7 +1858,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.extend_i32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.extend_i32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
 
         self.pushOperandNoCheck(u64, @as(u32, @truncate(c1)));
@@ -1867,7 +1866,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1882,7 +1881,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1897,7 +1896,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1912,7 +1911,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         if (math.isNan(c1)) return error.InvalidConversion;
@@ -1927,7 +1926,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.convert_i32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.convert_i32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i32);
 
         self.pushOperandNoCheck(f32, @as(f32, @floatFromInt(c1)));
@@ -1935,7 +1934,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.convert_i32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.convert_i32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u32);
 
         self.pushOperandNoCheck(f32, @as(f32, @floatFromInt(c1)));
@@ -1943,7 +1942,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.convert_i64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.convert_i64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(f32, @as(f32, @floatFromInt(c1)));
@@ -1951,7 +1950,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.convert_i64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.convert_i64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
 
         self.pushOperandNoCheck(f32, @as(f32, @floatFromInt(c1)));
@@ -1959,7 +1958,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.demote_f64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.demote_f64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(f32, @as(f32, @floatCast(c1)));
@@ -1967,7 +1966,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.convert_i32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.convert_i32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i32);
 
         self.pushOperandNoCheck(f64, @as(f64, @floatFromInt(c1)));
@@ -1975,7 +1974,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.convert_i32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.convert_i32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u32);
 
         self.pushOperandNoCheck(f64, @as(f64, @floatFromInt(c1)));
@@ -1983,7 +1982,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.convert_i64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.convert_i64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(f64, @as(f64, @floatFromInt(c1)));
@@ -1991,7 +1990,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.convert_i64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.convert_i64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(u64);
 
         self.pushOperandNoCheck(f64, @as(f64, @floatFromInt(c1)));
@@ -1999,7 +1998,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.promote_f32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.promote_f32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(f64, @as(f64, @floatCast(c1)));
@@ -2007,7 +2006,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.reinterpret_f32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.reinterpret_f32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
 
         self.pushOperandNoCheck(i32, @as(i32, @bitCast(c1)));
@@ -2015,7 +2014,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.reinterpret_f64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.reinterpret_f64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
 
         self.pushOperandNoCheck(i64, @as(i64, @bitCast(c1)));
@@ -2023,7 +2022,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f32.reinterpret_i32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f32.reinterpret_i32"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i32);
 
         self.pushOperandNoCheck(f32, @as(f32, @bitCast(c1)));
@@ -2031,7 +2030,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"f64.reinterpret_i64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"f64.reinterpret_i64"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(f64, @as(f64, @bitCast(c1)));
@@ -2039,7 +2038,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.extend8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.extend8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i32);
 
         self.pushOperandNoCheck(i32, @as(i8, @truncate(c1)));
@@ -2047,7 +2046,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.extend16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.extend16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i32);
 
         self.pushOperandNoCheck(i32, @as(i16, @truncate(c1)));
@@ -2055,7 +2054,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.extend8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.extend8_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(i64, @as(i8, @truncate(c1)));
@@ -2063,7 +2062,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.extend16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.extend16_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(i64, @as(i16, @truncate(c1)));
@@ -2071,7 +2070,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.extend32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.extend32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(i64);
 
         self.pushOperandNoCheck(i64, @as(i32, @truncate(c1)));
@@ -2079,13 +2078,13 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"ref.null"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"ref.null"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         self.pushOperandNoCheck(u64, REF_NULL);
 
         ip.ip += 1;
     }
 
-    fn @"ref.is_null"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"ref.is_null"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const value = self.popOperand(u64);
 
         if (value == REF_NULL) {
@@ -2097,7 +2096,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"ref.func"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"ref.func"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const funcidx = ip.code[ip.ip].@"ref.func";
 
         const ref = self.inst.funcaddrs.items[funcidx]; // Not sure about this at all, this could still coincidentally be zero?
@@ -2107,8 +2106,9 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn misc(self: *VirtualMachine, ip: *Instruction) WasmError!void {
-        return miscDispatch(self, ip);
+    inline fn misc(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+        const next_instr = ip.code[ip.ip].misc;
+        return misc_lookup[@intFromEnum(next_instr)](self, ip);
     }
 
     const misc_lookup = [18]InstructionFunction{
@@ -2116,12 +2116,7 @@ pub const VirtualMachine = struct {
         @"table.size",          @"table.fill",
     };
 
-    inline fn miscDispatch(self: *VirtualMachine, next_ip: *Instruction) WasmError!void {
-        const next_instr = next_ip.code[next_ip.ip].misc;
-        return misc_lookup[@intFromEnum(next_instr)](self, next_ip);
-    }
-
-    fn @"i32.trunc_sat_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_sat_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
         const trunc = @trunc(c1);
 
@@ -2143,7 +2138,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_sat_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_sat_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
         const trunc = @trunc(c1);
 
@@ -2165,7 +2160,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_sat_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_sat_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
         const trunc = @trunc(c1);
 
@@ -2187,7 +2182,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i32.trunc_sat_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i32.trunc_sat_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
         const trunc = @trunc(c1);
 
@@ -2209,7 +2204,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_sat_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_sat_f32_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
         const trunc = @trunc(c1);
 
@@ -2231,7 +2226,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_sat_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_sat_f32_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f32);
         const trunc = @trunc(c1);
 
@@ -2253,7 +2248,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_sat_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_sat_f64_s"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
         const trunc = @trunc(c1);
 
@@ -2275,7 +2270,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"i64.trunc_sat_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"i64.trunc_sat_f64_u"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const c1 = self.popOperand(f64);
         const trunc = @trunc(c1);
 
@@ -2297,7 +2292,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"memory.init"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"memory.init"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"memory.init";
 
         const n = self.popOperand(u32);
@@ -2324,7 +2319,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"data.drop"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"data.drop"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const dataidx = ip.code[ip.ip].misc.@"data.drop";
         const data = try self.inst.getData(dataidx);
         data.dropped = true;
@@ -2332,7 +2327,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"memory.copy"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"memory.copy"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const n = self.popOperand(u32);
         const src = self.popOperand(u32);
         const dest = self.popOperand(u32);
@@ -2358,7 +2353,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"memory.fill"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"memory.fill"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const n = self.popOperand(u32);
         const value = self.popOperand(u32);
         const dest = self.popOperand(u32);
@@ -2376,7 +2371,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.init"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.init"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"table.init";
         const tableidx = meta.tableidx;
         const elemidx = meta.elemidx;
@@ -2407,7 +2402,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"elem.drop"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"elem.drop"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"elem.drop";
         const elemidx = meta.elemidx;
         const elem = try self.inst.getElem(elemidx);
@@ -2416,7 +2411,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.copy"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.copy"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"table.copy";
         const dest_tableidx = meta.dest_tableidx;
         const src_tableidx = meta.src_tableidx;
@@ -2453,7 +2448,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.grow"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.grow"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"table.grow";
         const tableidx = meta.tableidx;
 
@@ -2475,7 +2470,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.size"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.size"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"table.size";
         const tableidx = meta.tableidx;
 
@@ -2486,7 +2481,7 @@ pub const VirtualMachine = struct {
         ip.ip += 1;
     }
 
-    fn @"table.fill"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
+    inline fn @"table.fill"(self: *VirtualMachine, ip: *Instruction) WasmError!void {
         const meta = ip.code[ip.ip].misc.@"table.fill";
         const tableidx = meta.tableidx;
 
