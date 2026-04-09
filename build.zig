@@ -4,11 +4,9 @@ pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zware_module = b.createModule(.{
+    const zware_module = b.addModule("zware", .{
         .root_source_file = b.path("src/main.zig"),
     });
-
-    try b.modules.put(b.dupe("zware"), zware_module);
 
     const main_mod = b.addModule("zware", .{
         .root_source_file = b.path("src/main.zig"),
@@ -53,6 +51,7 @@ pub fn build(b: *Build) !void {
         const json_file = run_wast2json.addOutputFileArg(b.fmt("{s}.json", .{test_name}));
 
         const run_test = b.addRunArtifact(testrunner);
+        run_test.setName(b.fmt("run test-{s}", .{test_name}));
         run_test.addFileArg(json_file);
         run_test.cwd = json_file.dirname();
         const step = b.step(b.fmt("test-{s}", .{test_name}), b.fmt("Run the '{s}' test", .{test_name}));
@@ -127,35 +126,38 @@ fn addWast2Json(b: *Build) *Build.Step.Compile {
         .SIZEOF_SIZE_T = @sizeOf(usize),
     });
 
-    const wabt_lib = b.addLibrary(.{
-        .name = "wabt",
-        .root_module = b.createModule(.{
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
+    const wabt_mod = b.createModule(.{
+        .target = b.graph.host,
+        .optimize = .Debug,
+        .link_libcpp = true,
     });
-    wabt_lib.addConfigHeader(wabt_config_h);
-    wabt_lib.addIncludePath(wabt_dep.path("include"));
-    wabt_lib.addCSourceFiles(.{
+    wabt_mod.addConfigHeader(wabt_config_h);
+    wabt_mod.addIncludePath(wabt_dep.path("include"));
+    wabt_mod.addCSourceFiles(.{
         .root = wabt_dep.path("."),
         .files = &wabt_files,
     });
-    wabt_lib.linkLibCpp();
 
-    const wast2json = b.addExecutable(.{
-        .name = "wast2json",
-        .root_module = b.createModule(.{
-            .target = b.graph.host,
-        }),
+    const wabt_lib = b.addLibrary(.{
+        .name = "wabt",
+        .root_module = wabt_mod,
     });
+
+    const wast2json = b.createModule(.{
+        .target = b.graph.host,
+        .link_libcpp = true,
+    });
+
     wast2json.addConfigHeader(wabt_config_h);
     wast2json.addIncludePath(wabt_dep.path("include"));
     wast2json.addCSourceFile(.{
         .file = wabt_dep.path("src/tools/wast2json.cc"),
     });
-    wast2json.linkLibCpp();
     wast2json.linkLibrary(wabt_lib);
-    return wast2json;
+    return b.addExecutable(.{
+        .name = "wast2json",
+        .root_module = wast2json,
+    });
 }
 
 const test_names = [_][]const u8{
