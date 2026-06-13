@@ -807,7 +807,9 @@ pub const Decoder = struct {
     }
 
     fn takeLEB128(self: *Decoder, comptime T: type) !T {
-        return self.rd.takeLeb128(T);
+        // vendored from: https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/std/Io/Reader.zig#L1292
+        const leb128 = @import("leb128.zig");
+        return leb128.takeLeb128(&self.rd, T);
     }
 
     pub fn takeSlice(self: *Decoder, count: usize) ![]const u8 {
