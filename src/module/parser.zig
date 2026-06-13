@@ -1199,7 +1199,8 @@ pub const Parser = struct {
 
     pub fn readLEB128Mem(self: *Parser, comptime T: type) !T {
         var rd = std.Io.Reader.fixed(self.code);
-        const value = try rd.takeLeb128(T);
+        const leb128 = @import("../leb128.zig");
+        const value = try leb128.takeLeb128(&rd, T);
 
         if (@typeInfo(T).int.signedness == .signed) {
             // The following is a bit of a kludge that should really

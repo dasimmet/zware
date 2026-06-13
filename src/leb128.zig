@@ -61,7 +61,7 @@ pub fn takeLeb128(r: *Reader, comptime T: type) TakeLeb128Error!T {
             const bits_overflowed = bits_written - info.bits;
             const bits_remaining = @mod(info.bits, 7);
 
-            const allowed_bits: u7, var fits: bool = switch (info.signedness) {
+            const allowed_bits: u7, const fits: bool = switch (info.signedness) {
                 .unsigned => blk: {
                     const fits = bits_remaining == 0 or byte.bits >> bits_remaining == 0;
 
@@ -92,15 +92,8 @@ pub fn takeLeb128(r: *Reader, comptime T: type) TakeLeb128Error!T {
                 .unsigned => comptime assert(allowed_bits == 0),
             }
 
-            while (byte.more) {
-                byte = @bitCast(try r.takeByte());
-                if (byte.bits != allowed_bits) fits = false;
-            }
-
-            return if (fits) blk: {
-                @branchHint(.likely);
-                break :blk std.math.cast(T, @as(Int, @bitCast(val))) orelse error.Overflow;
-            } else error.Overflow;
+            if (!fits or byte.more) return error.Overflow;
+            return std.math.cast(T, @as(Int, @bitCast(val))) orelse error.Overflow;
         }
 
         comptime assert(bits_written < info.bits);
