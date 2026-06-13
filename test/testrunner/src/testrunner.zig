@@ -494,7 +494,7 @@ pub fn main(init: std.process.Init) anyerror!void {
 
                     if (mem.eql(u8, trap, "malformed reference type")) {
                         switch (err) {
-                            error.InvalidValue => continue,
+                            error.InvalidEnumTag => continue,
                             else => {},
                         }
                     }
@@ -539,6 +539,7 @@ pub fn main(init: std.process.Init) anyerror!void {
                             error.InvalidValue => continue,
                             error.ExpectedFuncTypeTag => continue,
                             error.Overflow => continue,
+                            error.InvalidEnumTag => continue,
                             else => {},
                         }
                     }
@@ -586,7 +587,7 @@ pub fn main(init: std.process.Init) anyerror!void {
 
                     if (mem.eql(u8, trap, "malformed import kind")) {
                         switch (err) {
-                            error.InvalidValue => continue,
+                            error.InvalidEnumTag => continue,
                             else => {},
                         }
                     }
@@ -594,7 +595,7 @@ pub fn main(init: std.process.Init) anyerror!void {
                     if (mem.eql(u8, trap, "integer too large")) {
                         switch (err) {
                             error.Overflow => continue,
-                            error.InvalidValue => continue, // test/testsuite/binary.wast:601 I think the test is wrong
+                            error.InvalidEnumTag => continue, // test/testsuite/binary.wast:1463
                             else => {},
                         }
                     }
