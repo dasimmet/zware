@@ -1,26 +1,24 @@
-const Build = @import("std").Build;
+const std = @import("std");
+const Build = std.Build;
 
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zware_module = b.addModule("zware", .{
-        .root_source_file = b.path("src/main.zig"),
-    });
-
-    const main_mod = b.addModule("zware", .{
+    const zware = b.addModule("zware", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+
     const lib = b.addLibrary(.{
         .name = "zware",
-        .root_module = main_mod,
+        .root_module = zware,
     });
     b.installArtifact(lib);
 
     const main_tests = b.addTest(.{
-        .root_module = main_mod,
+        .root_module = zware,
         .use_llvm = true,
     });
 
@@ -39,7 +37,7 @@ pub fn build(b: *Build) !void {
         }),
         .use_llvm = true,
     });
-    testrunner.root_module.addImport("zware", zware_module);
+    testrunner.root_module.addImport("zware", zware);
 
     const testsuite_dep = b.dependency("testsuite", .{});
 
@@ -73,14 +71,12 @@ pub fn build(b: *Build) !void {
             }),
             .use_llvm = true,
         });
-        exe.root_module.addImport("zware", zware_module);
+        exe.root_module.addImport("zware", zware);
         const install = b.addInstallArtifact(exe, .{});
         b.getInstallStep().dependOn(&install.step);
         const run = b.addRunArtifact(exe);
         run.step.dependOn(&install.step);
-        if (b.args) |args| {
-            run.addArgs(args);
-        }
+        passthroughArgs(b, run);
         b.step("run", "Run the cmdline runner zware-run").dependOn(&run.step);
     }
 
@@ -93,14 +89,12 @@ pub fn build(b: *Build) !void {
                 .optimize = optimize,
             }),
         });
-        exe.root_module.addImport("zware", zware_module);
+        exe.root_module.addImport("zware", zware);
         const install = b.addInstallArtifact(exe, .{});
         b.getInstallStep().dependOn(&install.step);
         const run = b.addRunArtifact(exe);
         run.step.dependOn(&install.step);
-        if (b.args) |args| {
-            run.addArgs(args);
-        }
+        passthroughArgs(b, run);
         b.step("gen", "Run the cmdline runner zware-gen").dependOn(&run.step);
     }
 }
@@ -284,3 +278,14 @@ const wabt_files = [_][]const u8{
     "src/wast-lexer.cc",
     "src/wast-parser.cc",
 };
+
+// zig 0.17.0 and 0.16.0 compatible args passthrough function
+inline fn passthroughArgs(b: *Build, run: *Build.Step.Run) void {
+    if (comptime @import("builtin").zig_version.order(std.SemanticVersion.parse("0.16.0") catch unreachable) == .gt) {
+        run.addPassthruArgs();
+    } else {
+        if (b.args) |args| {
+            for (args) |arg| run.addArg(arg);
+        }
+    }
+}

@@ -29,7 +29,7 @@ pub const Parser = struct {
     validator: Validator = undefined,
     params: ?[]const ValType,
     locals: ?[]LocalType,
-    continuation_stack: [1024]usize = [_]usize{0} ** 1024,
+    continuation_stack: [1024]usize = @splat(0),
     continuation_stack_ptr: usize,
     is_constant: bool = false,
     scope: usize,
@@ -81,8 +81,8 @@ pub const Parser = struct {
         self.code = code;
         const code_start = self.module.parsed_code.items.len;
 
-        const in: [0]ValType = [_]ValType{} ** 0;
-        const out: [1]ValType = [_]ValType{valtype} ** 1;
+        const in: [0]ValType = .{};
+        const out: [1]ValType = @splat(valtype);
 
         try self.validator.pushControlFrame(
             .block,
@@ -1248,14 +1248,14 @@ pub const Parser = struct {
     }
 };
 
-const EMPTY = [0]ValType{} ** 0;
-const I32_OUT = [1]ValType{.I32} ** 1;
-const I64_OUT = [1]ValType{.I64} ** 1;
-const F32_OUT = [1]ValType{.F32} ** 1;
-const F64_OUT = [1]ValType{.F64} ** 1;
-const V128_OUT = [1]ValType{.V128} ** 1;
-const FUNCREF_OUT = [1]ValType{.FuncRef} ** 1;
-const EXTERNREF_OUT = [1]ValType{.ExternRef} ** 1;
+const EMPTY: [0]ValType = .{};
+const I32_OUT: [1]ValType = @splat(.I32);
+const I64_OUT: [1]ValType = @splat(.I64);
+const F32_OUT: [1]ValType = @splat(.F32);
+const F64_OUT: [1]ValType = @splat(.F64);
+const V128_OUT: [1]ValType = @splat(.V128);
+const FUNCREF_OUT: [1]ValType = @splat(.FuncRef);
+const EXTERNREF_OUT: [1]ValType = @splat(.ExternRef);
 
 pub fn valueTypeFromBlockType(block_type: i32) !ValType {
     return switch (block_type) {
