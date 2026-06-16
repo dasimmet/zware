@@ -74,7 +74,9 @@ pub fn main(init: std.process.Init) anyerror!void {
     var args = try init.minimal.args.iterateAllocator(init.arena.allocator());
     _ = args.skip();
     const filename = args.next() orelse return error.NoFilename;
-    std.log.info("testing: {s}", .{filename});
+    errdefer {
+        std.log.info("testing: {s}", .{filename});
+    }
 
     // 2. Parse json and find .wasm file
     const json_string = try std.Io.Dir.cwd().readFileAlloc(io, filename, alloc, .unlimited);
@@ -120,7 +122,6 @@ pub fn main(init: std.process.Init) anyerror!void {
             .module => {
                 wasm_filename = command.module.filename;
 
-                std.debug.print("(module): {s}:{} ({s})\n", .{ r.source_filename, command.module.line, wasm_filename });
                 program = try std.Io.Dir.cwd().readFileAlloc(io, wasm_filename, alloc, .unlimited);
 
                 errdefer {
@@ -145,7 +146,6 @@ pub fn main(init: std.process.Init) anyerror!void {
                 switch (action) {
                     .invoke => {
                         const field = action.invoke.field;
-                        std.debug.print("(return): {s}:{}\n", .{ r.source_filename, command.assert_return.line });
 
                         var instance = current_instance;
                         if (command.assert_return.action.invoke.module) |name| {
@@ -228,8 +228,6 @@ pub fn main(init: std.process.Init) anyerror!void {
                     },
                     .get => {
                         const field = action.get.field;
-                        std.debug.print("(return): get {s}:{} ({s})\n", .{ r.source_filename, command.assert_return.line, wasm_filename });
-                        std.debug.print("(result) get \"{s}\"\n", .{field});
                         if (action.get.module) |m| {
                             const registered_inst = registered_names.get(m) orelse return error.NotRegistered;
 
@@ -273,7 +271,6 @@ pub fn main(init: std.process.Init) anyerror!void {
                 switch (action) {
                     .invoke => {
                         const field = action.invoke.field;
-                        std.debug.print("(trap): {s}:{}\n", .{ r.source_filename, command.assert_trap.line });
 
                         errdefer {
                             std.debug.print("(trap) invoke = {s} at {s}:{}\n", .{ field, r.source_filename, command.assert_trap.line });
@@ -394,7 +391,6 @@ pub fn main(init: std.process.Init) anyerror!void {
             },
             .assert_invalid => {
                 wasm_filename = command.assert_invalid.filename;
-                std.debug.print("(invalid): {s}:{} ({s})\n", .{ r.source_filename, command.assert_invalid.line, wasm_filename });
 
                 program = try std.Io.Dir.cwd().readFileAlloc(io, wasm_filename, alloc, .unlimited);
                 module = Module.init(alloc, program);
@@ -459,7 +455,6 @@ pub fn main(init: std.process.Init) anyerror!void {
             .assert_malformed => {
                 if (mem.endsWith(u8, command.assert_malformed.filename, ".wat")) continue;
                 wasm_filename = command.assert_malformed.filename;
-                std.debug.print("(malformed): {s}:{} ({s})\n", .{ r.source_filename, command.assert_malformed.line, wasm_filename });
                 program = try std.Io.Dir.cwd().readFileAlloc(io, wasm_filename, alloc, .unlimited);
                 module = Module.init(alloc, program);
 
@@ -467,6 +462,7 @@ pub fn main(init: std.process.Init) anyerror!void {
 
                 errdefer {
                     std.debug.print("ERROR (malformed): {s}:{}\n", .{ r.source_filename, command.assert_malformed.line });
+                    std.debug.print("ERROR (malformed): {s}\n", .{trap});
                 }
 
                 if (module.decode()) |_| {
@@ -630,7 +626,6 @@ pub fn main(init: std.process.Init) anyerror!void {
                 switch (action) {
                     .invoke => {
                         const field = action.invoke.field;
-                        std.debug.print("(return): {s}:{}\n", .{ r.source_filename, command.action.line });
 
                         // Allocate input parameters and output results
                         var in = try alloc.alloc(u64, action.invoke.args.len);
@@ -657,7 +652,6 @@ pub fn main(init: std.process.Init) anyerror!void {
             },
             .assert_unlinkable => {
                 wasm_filename = command.assert_unlinkable.filename;
-                std.debug.print("(unlinkable): {s}:{} ({s})\n", .{ r.source_filename, command.assert_unlinkable.line, wasm_filename });
                 program = try std.Io.Dir.cwd().readFileAlloc(io, wasm_filename, alloc, .unlimited);
 
                 module = Module.init(alloc, program);
@@ -684,7 +678,6 @@ pub fn main(init: std.process.Init) anyerror!void {
             },
             .assert_uninstantiable => {
                 wasm_filename = command.assert_uninstantiable.filename;
-                std.debug.print("(uninstantiable): {s}:{} ({s})\n", .{ r.source_filename, command.assert_uninstantiable.line, wasm_filename });
                 program = try std.Io.Dir.cwd().readFileAlloc(io, wasm_filename, alloc, .unlimited);
 
                 module = Module.init(alloc, program);
@@ -704,7 +697,6 @@ pub fn main(init: std.process.Init) anyerror!void {
                 }
             },
             .register => {
-                std.debug.print("(register): {s}:{}\n", .{ r.source_filename, command.register.line });
                 if (command.register.name) |name| {
                     const registered_inst = registered_names.get(name) orelse return error.NotRegistered;
 
