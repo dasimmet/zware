@@ -807,13 +807,30 @@ pub const Decoder = struct {
     }
 
     fn takeLeb128(self: *Decoder, comptime T: type) !T {
-        // vendored from: https://codeberg.org/ziglang/zig/src/tag/0.16.0/lib/std/Io/Reader.zig#L1292
-        const leb128 = @import("leb128.zig");
-        return leb128.takeLeb128(&self.rd, T);
+        return takeLeb128Exact(&self.rd, T);
     }
 
     pub fn takeSlice(self: *Decoder, count: usize) ![]const u8 {
         return self.rd.take(count);
+    }
+
+    pub fn takeLeb128Exact(rd: *std.Io.Reader, comptime T: type) !T {
+        const size = @sizeOf(T);
+        const leb_size = comptime std.math.divCeil(usize, size * 8, 7) catch unreachable;
+        rd.fill(leb_size) catch |err| {
+            switch (err) {
+                error.EndOfStream => {},
+                error.ReadFailed => return err,
+            }
+        };
+        const seek_pre = rd.seek;
+        const res = try rd.takeLeb128(T);
+        if (seek_pre > rd.seek or (rd.seek - seek_pre) > leb_size) {
+            // leb128 is bigger than 8/7 of the integer size
+            // which is bigger than necessary
+            return error.InvalidValue;
+        }
+        return res;
     }
 };
 
